@@ -1,0 +1,6 @@
+package: enedis.fr/local-dns-proxy
+import:
+- package: github.com/Sirupsen/logrus
+- package: github.com/miekg/dns
+- package: gopkg.in/alecthomas/kingpin.v2
+- package: gopkg.in/yaml.v2

@@ -1,0 +1,22 @@
+---
+# Port du serveur DNS local
+serverPort: 10053
+# IP à binder du serveur
+serverIP: 0.0.0.0
+# Protocole udp/tcp
+serverProtocol: udp
+# Serveurs DNS ne comprenants pas les résultats de authorities
+authorities:
+  - domainName: toto.com
+    dnsServer: 42.42.42.42
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
+  - dnsServer: 8.8.8.8
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
+  - dnsServer: 8.8.4.4
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
