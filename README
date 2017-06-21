@@ -1,0 +1,4 @@
+# Local DNS Proxy
+## Build
+$ go build
+
