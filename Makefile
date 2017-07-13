@@ -2,7 +2,7 @@ BUILD_IMAGE := ryarnyah/docker-golang-builder:latest
 RELEASE_IMAGE := ryarnyah/docker-github-release:latest
 GITHUB_USER := ryarnyah
 GITHUB_REPO := local-dns-proxy
-GIT_TAG := v0.0.1
+GIT_TAG := v1.0.0
 
 PLATFORMS := linux/arm linux/amd64 windows/amd64
 
