@@ -11,5 +11,6 @@ deploy:
     - "local-dns-proxy-linux-amd64"
     - "local-dns-proxy-linux-arm"
     - "local-dns-proxy-windows-amd64"
+  skip_cleanup: true
   on:
-    repo: ryarnyah/local-dns-proxy
+    tags: true
