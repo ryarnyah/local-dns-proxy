@@ -81,36 +81,23 @@ func (handler *dnsHandler) leadAuthority(url string) dnsServer {
 }
 
 func (handler *dnsHandler) proxyRequest(w dns.ResponseWriter, r *dns.Msg, server dnsServer) {
-	log.Debugf("proxyRequest %+v", r)
+	log.Debugf("proxyRequest %+v on server %+v", r, server)
 	handler.Add(1)
 	defer handler.Done()
 
-	callResult := struct {
-		*dns.Msg
-		error
-	}{}
-	switch server.DnsProtocol {
-	case "tcp":
-		m, _, err := handler.tcpclient.Exchange(r, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
-		callResult = struct {
-			*dns.Msg
-			error
-		}{m, err}
-	case "udp":
-		m, _, err := handler.udpclient.Exchange(r, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
-		callResult = struct {
-			*dns.Msg
-			error
-		}{m, err}
-	default:
-		log.Fatal("DnsProtocol must be udp/tcp")
+	client := &dns.Client{
+		Net:     server.DnsProtocol,
+		Timeout: time.Duration(server.Timeout) * time.Second,
+		UDPSize: 4096,
 	}
-	if callResult.error != nil {
-		log.Errorf("unable to get info msg %s", callResult.error)
-		callResult.Msg = new(dns.Msg)
-		callResult.Msg.SetRcode(r, dns.RcodeNameError)
+	m, _, err := client.Exchange(r, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
+
+	if err != nil {
+		log.Errorf("unable to get info msg %s", err)
+		m = new(dns.Msg)
+		m.SetRcode(r, dns.RcodeNameError)
 	}
-	if err := w.WriteMsg(callResult.Msg); err != nil {
+	if err := w.WriteMsg(m); err != nil {
 		log.Errorf("unable to write msg %s", err)
 	}
 }
@@ -160,9 +147,7 @@ func main() {
 	log.Debugf("cfg %+v", cfg)
 
 	handler := &dnsHandler{
-		config:    cfg,
-		tcpclient: &dns.Client{Net: "tcp", Timeout: 4 * time.Second, UDPSize: 4096},
-		udpclient: &dns.Client{Net: "udp", Timeout: 4 * time.Second, UDPSize: 4096},
+		config: cfg,
 	}
 
 	if err := dns.ListenAndServe(fmt.Sprintf("%s:%d", cfg.ServerIP, cfg.ServerPort), cfg.ServerProtocol, handler); err != nil {
