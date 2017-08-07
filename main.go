@@ -9,6 +9,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/karlseguin/ccache"
 	"github.com/miekg/dns"
 	"gopkg.in/alecthomas/kingpin.v2"
 	yaml "gopkg.in/yaml.v2"
@@ -16,6 +17,10 @@ import (
 
 const (
 	configFilname = "config.yaml"
+)
+
+var (
+	cache = ccache.New(ccache.Configure())
 )
 
 type dnsServer struct {
@@ -34,10 +39,11 @@ type authority struct {
 }
 
 type config struct {
-	ServerPort     int         `yaml:"serverPort"`
-	ServerIP       string      `yaml:"serverIP"`
-	ServerProtocol string      `yaml:"serverProtocol"`
-	Authorities    []authority `yaml:"authorities"`
+	ServerPort     int           `yaml:"serverPort"`
+	ServerIP       string        `yaml:"serverIP"`
+	ServerProtocol string        `yaml:"serverProtocol"`
+	Authorities    []authority   `yaml:"authorities"`
+	CacheTTL       time.Duration `yaml:"cacheTTL"`
 }
 
 type dnsHandler struct {
@@ -48,7 +54,7 @@ type dnsHandler struct {
 	sync.WaitGroup
 }
 
-func (handler *dnsHandler) leadAuthority(url string) dnsServer {
+func (handler *dnsHandler) leadAuthority(url string) (*dnsServer, error) {
 	results := []dnsServer{}
 
 	for _, authority := range handler.config.Authorities {
@@ -77,37 +83,62 @@ func (handler *dnsHandler) leadAuthority(url string) dnsServer {
 		}
 	}
 
-	return results[rand.Intn(len(results))]
+	if len(results) == 0 {
+		return nil, fmt.Errorf("unable to find authority for %s", url)
+	}
+
+	return &results[rand.Intn(len(results))], nil
 }
 
-func (handler *dnsHandler) proxyRequest(w dns.ResponseWriter, r *dns.Msg, server dnsServer) {
-	log.Debugf("proxyRequest %+v on server %+v", r, server)
+func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	log.Debugf("proxyRequest %+v on server %+v", r)
 	handler.Add(1)
 	defer handler.Done()
+
+	questionDomain := r.Question[0].Name
+
+	server, err := handler.leadAuthority(questionDomain)
+	if err != nil {
+		log.Errorf("unable to find authority for %s : %s", questionDomain, err)
+		return
+	}
 
 	client := &dns.Client{
 		Net:     server.DnsProtocol,
 		Timeout: time.Duration(server.Timeout) * time.Second,
 		UDPSize: 4096,
 	}
-	m, _, err := client.Exchange(r, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
 
-	if err != nil {
-		log.Errorf("unable to get info msg %s", err)
-		m = new(dns.Msg)
-		m.SetRcode(r, dns.RcodeNameError)
+	dnsResp := r.Copy()
+
+	for _, question := range r.Question {
+		item, err := cache.Fetch("question:"+question.String(), handler.config.CacheTTL, func() (interface{}, error) {
+			msg := r.Copy()
+			msg.Question = []dns.Question{
+				question,
+			}
+			msg.Answer = []dns.RR{}
+			log.Debugf("execute %s", question.String())
+
+			resp, _, err := client.Exchange(msg, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
+			if err != nil {
+				return nil, fmt.Errorf("unable to get info msg %s", err)
+			}
+			return resp, nil
+
+		})
+		if err != nil {
+			log.Errorf("%s", err)
+			dnsResp.SetRcode(dnsResp, dns.RcodeNameError)
+			break
+		}
+		dnsResp.Answer = append(dnsResp.Answer, item.Value().(*dns.Msg).Answer...)
+
 	}
-	if err := w.WriteMsg(m); err != nil {
+
+	if err := w.WriteMsg(dnsResp); err != nil {
 		log.Errorf("unable to write msg %s", err)
 	}
-}
-
-func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	questionDomain := r.Question[0].Name
-
-	server := handler.leadAuthority(questionDomain)
-
-	go handler.proxyRequest(w, r, server)
 }
 
 func loadConfig() (*config, error) {

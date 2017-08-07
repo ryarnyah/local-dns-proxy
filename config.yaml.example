@@ -5,6 +5,7 @@ serverPort: 10053
 serverIP: 0.0.0.0
 # Protocole udp/tcp
 serverProtocol: udp
+cacheTTL: 1m
 # Serveurs DNS ne comprenants pas les résultats de authorities
 authorities:
   - domainName: toto.com
