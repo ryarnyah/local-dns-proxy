@@ -47,9 +47,7 @@ type config struct {
 }
 
 type dnsHandler struct {
-	config    *config
-	tcpclient *dns.Client
-	udpclient *dns.Client
+	config *config
 
 	sync.WaitGroup
 }
@@ -90,29 +88,11 @@ func (handler *dnsHandler) leadAuthority(url string) (*dnsServer, error) {
 	return &results[rand.Intn(len(results))], nil
 }
 
-func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	log.Debugf("proxyRequest %+v on server %+v", r)
-	handler.Add(1)
-	defer handler.Done()
-
-	questionDomain := r.Question[0].Name
-
-	server, err := handler.leadAuthority(questionDomain)
-	if err != nil {
-		log.Errorf("unable to find authority for %s : %s", questionDomain, err)
-		return
-	}
-
-	client := &dns.Client{
-		Net:     server.DnsProtocol,
-		Timeout: time.Duration(server.Timeout) * time.Second,
-		UDPSize: 4096,
-	}
-
+func resolveDnsQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
 	dnsResp := r.Copy()
 
 	for _, question := range r.Question {
-		item, err := cache.Fetch("question:"+question.String(), handler.config.CacheTTL, func() (interface{}, error) {
+		item, err := cache.Fetch("question:"+question.String(), cacheTTL, func() (interface{}, error) {
 			msg := r.Copy()
 			msg.Question = []dns.Question{
 				question,
@@ -135,7 +115,29 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		dnsResp.Answer = append(dnsResp.Answer, item.Value().(*dns.Msg).Answer...)
 
 	}
+	return dnsResp, nil
+}
 
+func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
+	log.Debugf("proxyRequest %+v on server %+v", r)
+	handler.Add(1)
+	defer handler.Done()
+
+	questionDomain := r.Question[0].Name
+
+	server, err := handler.leadAuthority(questionDomain)
+	if err != nil {
+		log.Errorf("unable to find authority for %s : %s", questionDomain, err)
+		return
+	}
+
+	client := &dns.Client{
+		Net:     server.DnsProtocol,
+		Timeout: time.Duration(server.Timeout) * time.Second,
+		UDPSize: 4096,
+	}
+
+	dnsResp, err := resolveDnsQuery(client, r, handler.config.CacheTTL, server)
 	if err := w.WriteMsg(dnsResp); err != nil {
 		log.Errorf("unable to write msg %s", err)
 	}
