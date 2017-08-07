@@ -163,7 +163,7 @@ func main() {
 	var (
 		logLevel = kingpin.Flag("log-level", "Niveau de log").Default("info").Enum("error", "warn", "debug", "panic", "info")
 	)
-	kingpin.Version("1.0.0")
+	kingpin.Version("1.1.0")
 	kingpin.Parse()
 
 	level, err := log.ParseLevel(*logLevel)
