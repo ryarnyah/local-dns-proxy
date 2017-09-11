@@ -4,7 +4,7 @@ GITHUB_USER := ryarnyah
 GITHUB_REPO := local-dns-proxy
 GIT_TAG := v1.0.0
 
-PLATFORMS := linux/arm linux/amd64 windows/amd64
+PLATFORMS := linux/arm linux/amd64 windows/amd64 windows/386
 
 all: $(PLATFORMS)
 
