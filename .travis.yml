@@ -11,6 +11,7 @@ deploy:
     - "local-dns-proxy-linux-amd64"
     - "local-dns-proxy-linux-arm"
     - "local-dns-proxy-windows-amd64"
+    - "local-dns-proxy-windows-386"
   skip_cleanup: true
   on:
     tags: true
