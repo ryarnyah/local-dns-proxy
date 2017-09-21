@@ -2,7 +2,11 @@ sudo: required
 language: go
 services:
 - docker
-script: make -j4
+script:
+  - make linux/arm
+  - make linux/amd64
+  - make windows/amd64
+  - make windows/386
 deploy:
   provider: releases
   api_key:
