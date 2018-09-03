@@ -138,6 +138,10 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 
 	dnsResp, err := resolveDnsQuery(client, r, handler.config.CacheTTL, server)
+	if err != nil {
+		log.Errorf("unable to find resolve dns query for %s : %s", questionDomain, err)
+		return
+	}
 	if err := w.WriteMsg(dnsResp); err != nil {
 		log.Errorf("unable to write msg %s", err)
 	}
