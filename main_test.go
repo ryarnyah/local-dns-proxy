@@ -16,13 +16,13 @@ func TestLeadAuthority(t *testing.T) {
 		ServerProtocol: "udp",
 		CacheTTL:       0,
 		Authorities: []authority{
-			authority{
+			{
 				DnsServer:   "8.8.4.4",
 				DnsPort:     53,
 				DnsProtocol: "udp",
 				Timeout:     2,
 			},
-			authority{
+			{
 				DnsServer:   "8.8.8.8",
 				DnsPort:     53,
 				DnsProtocol: "udp",
@@ -51,7 +51,7 @@ func TestLeadAuthority(t *testing.T) {
 	}
 
 	config.Authorities = []authority{
-		authority{
+		{
 			DnsServer:   "8.8.8.8",
 			DnsPort:     53,
 			DnsProtocol: "udp",
@@ -115,7 +115,7 @@ func TestResolveDnsQuery(t *testing.T) {
 
 	msg = &dns.Msg{
 		Question: []dns.Question{
-			dns.Question{
+			{
 				Name:   "toto.com.",
 				Qtype:  dns.TypeA,
 				Qclass: dns.ClassINET,
@@ -142,7 +142,7 @@ func TestResolveDnsQuery(t *testing.T) {
 	// Test fail
 	msg = &dns.Msg{
 		Question: []dns.Question{
-			dns.Question{
+			{
 				Name:   "google.com.",
 				Qtype:  dns.TypeA,
 				Qclass: dns.ClassINET,
@@ -175,7 +175,7 @@ func TestServeDNS(t *testing.T) {
 		ServerProtocol: "udp",
 		CacheTTL:       0,
 		Authorities: []authority{
-			authority{
+			{
 				DnsServer:   "127.0.0.1",
 				DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
 				DnsProtocol: "udp",
@@ -202,7 +202,7 @@ func TestServeDNS(t *testing.T) {
 
 	msg := &dns.Msg{
 		Question: []dns.Question{
-			dns.Question{
+			{
 				Name:   "toto.com.",
 				Qtype:  dns.TypeA,
 				Qclass: dns.ClassINET,
