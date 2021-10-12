@@ -297,7 +297,7 @@ func RunLocalUDPServerWithFinChan(laddr string) (*dns.Server, chan struct{}, err
 	waitLock.Lock()
 	server.NotifyStartedFunc = waitLock.Unlock
 
-	fin := make(chan struct{}, 0)
+	fin := make(chan struct{})
 
 	go func() {
 		_ = server.ActivateAndServe()

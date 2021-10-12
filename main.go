@@ -119,7 +119,7 @@ func resolveDnsQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 }
 
 func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
-	log.Debugf("proxyRequest %+v on server %+v", r)
+	log.Debugf("proxyRequest %+v on server", r)
 	handler.Add(1)
 	defer handler.Done()
 
