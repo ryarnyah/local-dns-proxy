@@ -82,11 +82,11 @@ cover: ## Runs go test with coverage
 define buildpretty
 mkdir -p $(BUILDDIR)/$(1)/$(2);
 GOOS=$(1) GOARCH=$(2) GO111MODULE=on CGO_ENABLED=0 go build \
-	 -o $(BUILDDIR)/$(1)/$(2)/$(3) \
+	 -o $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe) \
 	 -a -tags "$(BUILDTAGS) static_build netgo" \
 	 -installsuffix netgo $(call GO_LDFLAGS_STATIC,$3) $(BASE_BINARIES)/$(3);
-md5sum $(BUILDDIR)/$(1)/$(2)/$(3) > $(BUILDDIR)/$(1)/$(2)/$(3).md5;
-sha256sum $(BUILDDIR)/$(1)/$(2)/$(3) > $(BUILDDIR)/$(1)/$(2)/$(3).sha256;
+md5sum $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe) > $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe).md5;
+sha256sum $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe) > $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe).sha256;
 endef
 
 .PHONY: cross
@@ -96,11 +96,11 @@ cross: VERSION.txt ## Builds the cross-compiled binaries, creating a clean direc
 
 define buildrelease
 GOOS=$(1) GOARCH=$(2) GO111MODULE=on CGO_ENABLED=0 go build \
-	 -o $(BUILDDIR)/$(3)-$(1)-$(2) \
+	 -o $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe) \
 	 -a -tags "$(BUILDTAGS) static_build netgo" \
 	 -installsuffix netgo $(call GO_LDFLAGS_STATIC,$3) $(BASE_BINARIES);
-md5sum $(BUILDDIR)/$(3)-$(1)-$(2) > $(BUILDDIR)/$(3)-$(1)-$(2).md5;
-sha256sum $(BUILDDIR)/$(3)-$(1)-$(2) > $(BUILDDIR)/$(3)-$(1)-$(2).sha256;
+md5sum $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe) > $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe).md5;
+sha256sum $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe) > $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe).sha256;
 endef
 
 .PHONY: release
