@@ -17,8 +17,10 @@ jobs:
           go-version: '1.17'
       - name: Build
         run: |
+          apt-get update && apt-get install -y upx
           make dev-dependencies
           make release
+          find build -type f ! -name "*.md5" ! -name "*.sha256" -exec upx -9 {} \;
       - uses: softprops/action-gh-release@v1
         with:
           files: "build/local-dns-proxy-*"

@@ -23,8 +23,8 @@ ifneq ($(GITUNTRACKEDCHANGES),)
 	GITCOMMIT := $(GITCOMMIT)-dirty
 endif
 CTIMEVAR=-X $(BASE_PKG)/$(1)/version.GITCOMMIT=$(GITCOMMIT) -X $(BASE_PKG)/$(1)/version.VERSION=$(VERSION)
-GO_LDFLAGS=-ldflags "-w $(call CTIMEVAR,$(1))"
-GO_LDFLAGS_STATIC=-ldflags "-w $(call CTIMEVAR,$(1)) -extldflags -static"
+GO_LDFLAGS=-ldflags "-s -w $(call CTIMEVAR,$(1))"
+GO_LDFLAGS_STATIC=-ldflags "-s -w $(call CTIMEVAR,$(1)) -extldflags -static"
 
 # List the GOOS and GOARCH to build
 GOOSARCHES = linux/arm linux/amd64 linux/arm64 windows/amd64 windows/386
