@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/Sirupsen/logrus v1.0.6
 	github.com/karlseguin/ccache v2.0.3+incompatible
-	github.com/miekg/dns v1.1.47
+	github.com/miekg/dns v1.1.48
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/yaml.v2 v2.4.0
 )
