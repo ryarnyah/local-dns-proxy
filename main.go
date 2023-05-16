@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -150,7 +150,7 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 func loadConfig() (*config, error) {
 	cfg := new(config)
 
-	data, err := ioutil.ReadFile(configFilname)
+	data, err := os.ReadFile(configFilname)
 	if err != nil {
 		return nil, err
 	}
