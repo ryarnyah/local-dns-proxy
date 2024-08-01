@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/karlseguin/ccache"
 	"github.com/miekg/dns"
 	"gopkg.in/alecthomas/kingpin.v2"
