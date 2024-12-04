@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/karlseguin/ccache"
 	"github.com/miekg/dns"
-	"gopkg.in/alecthomas/kingpin.v2"
+	log "github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v2"
 )
 
