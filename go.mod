@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/alecthomas/kingpin/v2 v2.4.0
 	github.com/karlseguin/ccache v2.0.3+incompatible
-	github.com/miekg/dns v1.1.70
+	github.com/miekg/dns v1.1.72
 	github.com/sirupsen/logrus v1.9.3
 	gopkg.in/yaml.v2 v2.4.0
 )
