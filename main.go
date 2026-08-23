@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alecthomas/kingpin/v2"
+	"github.com/alecthomas/kong"
 	"github.com/karlseguin/ccache/v3"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/singleflight"
-	yaml "gopkg.in/yaml.v2"
+	yaml "gopkg.in/yaml.v3"
 )
 
 //go:embed VERSION.txt
@@ -344,13 +344,17 @@ func loadConfig() (*config, error) {
 // main parses flags, loads the configuration and serves DNS until a
 // fatal error occurs.
 func main() {
-	var (
-		logLevel = kingpin.Flag("log-level", "Niveau de log").Default("info").Enum("error", "warn", "debug", "panic", "info")
+	cli := struct {
+		LogLevel string           `help:"Niveau de log" enum:"error,warn,debug,panic,info" default:"info"`
+		Version  kong.VersionFlag `help:"Affiche la version."`
+	}{}
+	kong.Parse(&cli,
+		kong.Name("local-dns-proxy"),
+		kong.UsageOnError(),
+		kong.Vars{"version": strings.TrimSpace(version)},
 	)
-	kingpin.Version(strings.TrimSpace(version))
-	kingpin.Parse()
 
-	level, err := log.ParseLevel(*logLevel)
+	level, err := log.ParseLevel(cli.LogLevel)
 	if err != nil {
 		log.Panicf("unable to parse log level %s", err)
 	}
