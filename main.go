@@ -34,6 +34,7 @@ var (
 	inflight singleflight.Group
 )
 
+// dnsServer describes an upstream DNS server used for resolution.
 type dnsServer struct {
 	DNSServer   string `yaml:"dnsServer"`
 	DNSPort     int    `yaml:"dnsPort"`
@@ -41,6 +42,9 @@ type dnsServer struct {
 	Timeout     int    `yaml:"timeout"`
 }
 
+// authority is a configured upstream DNS server, optionally scoped to a
+// domain: queries matching DomainName are routed there, others fall back
+// to authorities without a DomainName.
 type authority struct {
 	DNSServer   string `yaml:"dnsServer"`
 	DNSPort     int    `yaml:"dnsPort"`
@@ -49,6 +53,7 @@ type authority struct {
 	DomainName  string `yaml:"domainName"`
 }
 
+// config is the on-disk configuration loaded from config.yaml.
 type config struct {
 	ServerPort     int           `yaml:"serverPort"`
 	ServerIP       string        `yaml:"serverIP"`
@@ -57,6 +62,8 @@ type config struct {
 	CacheTTL       time.Duration `yaml:"cacheTTL"`
 }
 
+// dnsHandler implements dns.Handler: it routes each query to the right
+// authority and serves answers from cache when possible.
 type dnsHandler struct {
 	config *config
 
@@ -67,12 +74,16 @@ type dnsHandler struct {
 	sync.WaitGroup
 }
 
+// resolvedAuthority is an authority prepared at startup: its domain is
+// canonicalized and its client pre-built so queries need no setup work.
 type resolvedAuthority struct {
 	server dnsServer
 	domain string
 	client *dns.Client
 }
 
+// newDNSHandler builds a handler from cfg, precomputing canonical domain
+// names and dns.Clients for every configured authority.
 func newDNSHandler(cfg *config) *dnsHandler {
 	handler := &dnsHandler{config: cfg}
 	for _, authority := range cfg.Authorities {
@@ -94,6 +105,8 @@ func newDNSHandler(cfg *config) *dnsHandler {
 	return handler
 }
 
+// canonicalName lowercases name and appends the root dot if missing,
+// yielding the canonical form used for matching and cache keys.
 func canonicalName(name string) string {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name != "" && !strings.HasSuffix(name, ".") {
@@ -102,6 +115,9 @@ func canonicalName(name string) string {
 	return name
 }
 
+// leadAuthority selects the upstream server for qname: domain-specific
+// authorities win over defaults, and one is drawn uniformly at random
+// among the matching ones for load balancing.
 func (handler *dnsHandler) leadAuthority(qname string) (*resolvedAuthority, error) {
 	qname = canonicalName(qname)
 
@@ -117,6 +133,9 @@ func (handler *dnsHandler) leadAuthority(qname string) (*resolvedAuthority, erro
 	return nil, fmt.Errorf("unable to find authority for %s", qname)
 }
 
+// pickAuthority returns one authority among those matching qname, or
+// nil when none does. When specific is true only domain-scoped
+// authorities are considered; when false only the default ones.
 func (handler *dnsHandler) pickAuthority(qname string, specific bool) *resolvedAuthority {
 	candidates := make([]*resolvedAuthority, 0, len(handler.authorities))
 	for i := range handler.authorities {
@@ -145,6 +164,9 @@ func subDomainOf(parent, qname string) bool {
 	return i == 0 || qname[i-1] == '.'
 }
 
+// matchesDomain reports whether a considers itself responsible for
+// qname: scoped authorities match their subtree, default authorities
+// match everything.
 func (a *resolvedAuthority) matchesDomain(qname string, specific bool) bool {
 	if specific {
 		return a.domain != "" && subDomainOf(a.domain, qname)
@@ -152,6 +174,9 @@ func (a *resolvedAuthority) matchesDomain(qname string, specific bool) bool {
 	return a.domain == ""
 }
 
+// cacheKey builds the cache key for a single question against one
+// upstream server, so answers from different authorities and record
+// types never collide.
 func cacheKey(server *dnsServer, question dns.Question) string {
 	var b strings.Builder
 	b.Grow(len(server.DNSServer) + len(question.Name) + 24)
@@ -184,6 +209,10 @@ func cachedFetch(key string, cacheTTL time.Duration, fetch func() (interface{}, 
 	return value, err
 }
 
+// resolveDNSQuery answers every question in r by consulting the cache
+// (fetching from server on miss) and merging the answers into a reply.
+// Upstream failures yield a SERVFAIL reply; upstream rcodes such as
+// NXDOMAIN are propagated as-is.
 func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
 	// Build the reply directly instead of copying the whole request: the
 	// question section is shared read-only and answers are appended below.
@@ -227,6 +256,9 @@ func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 	return dnsResp, nil
 }
 
+// ServeDNS implements dns.Handler. It answers FORMERR for malformed
+// queries without questions, REFUSED when no authority matches, and
+// otherwise proxies the query to the selected authority.
 func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	log.Debugf("proxyRequest %+v on server", r)
 	handler.Add(1)
@@ -264,6 +296,8 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	}
 }
 
+// loadConfig reads and validates config.yaml from the working
+// directory, rejecting malformed or unsafe values at startup.
 func loadConfig() (*config, error) {
 	cfg := new(config)
 
@@ -305,6 +339,8 @@ func loadConfig() (*config, error) {
 	return cfg, nil
 }
 
+// main parses flags, loads the configuration and serves DNS until a
+// fatal error occurs.
 func main() {
 	var (
 		logLevel = kingpin.Flag("log-level", "Niveau de log").Default("info").Enum("error", "warn", "debug", "panic", "info")
