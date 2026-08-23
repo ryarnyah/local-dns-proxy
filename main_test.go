@@ -21,15 +21,15 @@ func TestLeadAuthority(t *testing.T) {
 		CacheTTL:       0,
 		Authorities: []authority{
 			{
-				DnsServer:   "8.8.4.4",
-				DnsPort:     53,
-				DnsProtocol: "udp",
+				DNSServer:   "8.8.4.4",
+				DNSPort:     53,
+				DNSProtocol: "udp",
 				Timeout:     2,
 			},
 			{
-				DnsServer:   "8.8.8.8",
-				DnsPort:     53,
-				DnsProtocol: "udp",
+				DNSServer:   "8.8.8.8",
+				DNSPort:     53,
+				DNSProtocol: "udp",
 				Timeout:     2,
 				DomainName:  "google.fr",
 			},
@@ -41,14 +41,14 @@ func TestLeadAuthority(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if dnsServer.server.DnsServer != "8.8.8.8" {
+	if dnsServer.server.DNSServer != "8.8.8.8" {
 		t.Error("unable to lead for google.fr")
 	}
 	dnsServer, err = dnsHandler.leadAuthority("toto.com")
 	if err != nil {
 		t.Error(err)
 	}
-	if dnsServer.server.DnsServer != "8.8.4.4" {
+	if dnsServer.server.DNSServer != "8.8.4.4" {
 		t.Error("unable to lead for toto.com")
 	}
 
@@ -57,22 +57,22 @@ func TestLeadAuthority(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if dnsServer.server.DnsServer != "8.8.8.8" {
+	if dnsServer.server.DNSServer != "8.8.8.8" {
 		t.Error("unable to lead for google.fr.")
 	}
 	dnsServer, err = dnsHandler.leadAuthority("DEV.GOOGLE.FR.")
 	if err != nil {
 		t.Error(err)
 	}
-	if dnsServer.server.DnsServer != "8.8.8.8" {
+	if dnsServer.server.DNSServer != "8.8.8.8" {
 		t.Error("unable to lead for DEV.GOOGLE.FR.")
 	}
 
 	config.Authorities = []authority{
 		{
-			DnsServer:   "8.8.8.8",
-			DnsPort:     53,
-			DnsProtocol: "udp",
+			DNSServer:   "8.8.8.8",
+			DNSPort:     53,
+			DNSProtocol: "udp",
 			Timeout:     2,
 			DomainName:  "google.fr",
 		},
@@ -97,15 +97,15 @@ func TestLeadAuthorityLabelBoundary(t *testing.T) {
 		CacheTTL:       0,
 		Authorities: []authority{
 			{
-				DnsServer:   "8.8.4.4",
-				DnsPort:     53,
-				DnsProtocol: "udp",
+				DNSServer:   "8.8.4.4",
+				DNSPort:     53,
+				DNSProtocol: "udp",
 				Timeout:     2,
 			},
 			{
-				DnsServer:   "8.8.8.8",
-				DnsPort:     53,
-				DnsProtocol: "udp",
+				DNSServer:   "8.8.8.8",
+				DNSPort:     53,
+				DNSProtocol: "udp",
 				Timeout:     2,
 				DomainName:  "google.fr",
 			},
@@ -120,7 +120,7 @@ func TestLeadAuthorityLabelBoundary(t *testing.T) {
 			t.Errorf("%s should fall back to default authority: %v", qname, err)
 			continue
 		}
-		if server.server.DnsServer != "8.8.4.4" {
+		if server.server.DNSServer != "8.8.4.4" {
 			t.Errorf("%s must not be routed to the google.fr authority", qname)
 		}
 	}
@@ -140,15 +140,15 @@ func TestResolveDnsQuery(t *testing.T) {
 	}
 
 	dnsServer := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{}
 
-	dMsg, err := resolveDnsQuery(client, msg, 0, dnsServer)
+	dMsg, err := resolveDNSQuery(client, msg, 0, dnsServer)
 	if err != nil {
 		t.Fail()
 	}
@@ -178,7 +178,7 @@ func TestResolveDnsQuery(t *testing.T) {
 			},
 		},
 	}
-	dMsg, err = resolveDnsQuery(client, msg, 1*time.Minute, dnsServer)
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer)
 	if err != nil {
 		t.Fail()
 	}
@@ -190,7 +190,7 @@ func TestResolveDnsQuery(t *testing.T) {
 	}
 	dns.HandleRemove("toto.com.")
 	// Test cache without handler
-	dMsg, err = resolveDnsQuery(client, msg, 1*time.Minute, dnsServer)
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer)
 	if err != nil {
 		t.Fail()
 	}
@@ -212,9 +212,9 @@ func TestResolveDnsQuery(t *testing.T) {
 		},
 	}
 
-	dnsServer.DnsServer = "127.0.0.2"
+	dnsServer.DNSServer = "127.0.0.2"
 
-	dMsg, err = resolveDnsQuery(client, msg, 1*time.Minute, dnsServer)
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer)
 	if err != nil {
 		t.Error(err)
 	}
@@ -254,29 +254,29 @@ func TestResolveDnsQueryQTypeIsolation(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	aMsg := &dns.Msg{Question: []dns.Question{{Name: "dual.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	aaaaMsg := &dns.Msg{Question: []dns.Question{{Name: "dual.test.", Qtype: dns.TypeAAAA, Qclass: dns.ClassINET}}}
 
-	respA, err := resolveDnsQuery(client, aMsg, time.Minute, server)
+	respA, err := resolveDNSQuery(client, aMsg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	respAAAA, err := resolveDnsQuery(client, aaaaMsg, time.Minute, server)
+	respAAAA, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Second round must be served from cache without mixing types
-	respA2, err := resolveDnsQuery(client, aMsg, time.Minute, server)
+	respA2, err := resolveDNSQuery(client, aMsg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
-	respAAAA2, err := resolveDnsQuery(client, aaaaMsg, time.Minute, server)
+	respAAAA2, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,14 +311,14 @@ func TestResolveDnsQueryNXDOMAINPropagation(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "nx.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDnsQuery(client, msg, time.Minute, server)
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,14 +360,14 @@ func TestResolveDnsQueryCNAMEChain(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "alias.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDnsQuery(client, msg, time.Minute, server)
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,18 +407,18 @@ func TestCacheTTLExpiry(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "ttl.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 
-	if _, err := resolveDnsQuery(client, msg, 80*time.Millisecond, server); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveDnsQuery(client, msg, 80*time.Millisecond, server); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -429,7 +429,7 @@ func TestCacheTTLExpiry(t *testing.T) {
 	mu.Unlock()
 
 	time.Sleep(150 * time.Millisecond)
-	if _, err := resolveDnsQuery(client, msg, 80*time.Millisecond, server); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -461,15 +461,15 @@ func TestCacheDisabled(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "nocache.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	for i := 0; i < 3; i++ {
-		if _, err := resolveDnsQuery(client, msg, 0, server); err != nil {
+		if _, err := resolveDNSQuery(client, msg, 0, server); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -505,9 +505,9 @@ func TestConcurrentQueries(t *testing.T) {
 		CacheTTL: time.Minute,
 		Authorities: []authority{
 			{
-				DnsServer:   "127.0.0.1",
-				DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-				DnsProtocol: "udp",
+				DNSServer:   "127.0.0.1",
+				DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+				DNSProtocol: "udp",
 				Timeout:     4,
 			},
 		},
@@ -565,14 +565,14 @@ func TestResolveDnsQueryOverTCP(t *testing.T) {
 
 	client := &dns.Client{Net: "tcp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.Listener.Addr().(*net.TCPAddr).Port,
-		DnsProtocol: "tcp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.Listener.Addr().(*net.TCPAddr).Port,
+		DNSProtocol: "tcp",
 		Timeout:     4,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "tcp.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDnsQuery(client, msg, time.Minute, server)
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,16 +600,16 @@ func TestUpstreamTimeout(t *testing.T) {
 
 	client := &dns.Client{Net: "udp", Timeout: time.Duration(1) * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     1,
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "slow.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 
 	start := time.Now()
-	dMsg, err := resolveDnsQuery(client, msg, 0, server)
+	dMsg, err := resolveDNSQuery(client, msg, 0, server)
 	elapsed := time.Since(start)
 
 	if elapsed > 3*time.Second {
@@ -637,9 +637,9 @@ func TestServeDNS(t *testing.T) {
 		CacheTTL:       0,
 		Authorities: []authority{
 			{
-				DnsServer:   "127.0.0.1",
-				DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-				DnsProtocol: "udp",
+				DNSServer:   "127.0.0.1",
+				DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+				DNSProtocol: "udp",
 				Timeout:     2,
 			},
 		},
@@ -704,9 +704,9 @@ func TestServeDNSNoAuthority(t *testing.T) {
 		CacheTTL: 0,
 		Authorities: []authority{
 			{
-				DnsServer:   "8.8.8.8",
-				DnsPort:     53,
-				DnsProtocol: "udp",
+				DNSServer:   "8.8.8.8",
+				DNSPort:     53,
+				DNSProtocol: "udp",
 				Timeout:     2,
 				DomainName:  "google.fr",
 			},
@@ -836,7 +836,7 @@ authorities:
     dnsProtocol: udp
     timeout: 2
 `
-	emptyDnsServer := `---
+	emptyDNSServer := `---
 serverPort: 10053
 serverProtocol: udp
 authorities:
@@ -844,7 +844,7 @@ authorities:
     dnsProtocol: udp
     timeout: 2
 `
-	badDnsPort := `---
+	badDNSPort := `---
 serverPort: 10053
 serverProtocol: udp
 authorities:
@@ -853,7 +853,7 @@ authorities:
     dnsProtocol: udp
     timeout: 2
 `
-	badDnsProtocol := `---
+	badDNSProtocol := `---
 serverPort: 10053
 serverProtocol: udp
 authorities:
@@ -875,9 +875,9 @@ authorities:
 		{name: "zero timeout", content: zeroTimeout, create: true, wantErr: true},
 		{name: "bad protocol", content: badProtocol, create: true, wantErr: true},
 		{name: "bad port", content: badPort, create: true, wantErr: true},
-		{name: "empty dns server", content: emptyDnsServer, create: true, wantErr: true},
-		{name: "bad dns port", content: badDnsPort, create: true, wantErr: true},
-		{name: "bad dns protocol", content: badDnsProtocol, create: true, wantErr: true},
+		{name: "empty dns server", content: emptyDNSServer, create: true, wantErr: true},
+		{name: "bad dns port", content: badDNSPort, create: true, wantErr: true},
+		{name: "bad dns protocol", content: badDNSProtocol, create: true, wantErr: true},
 		{name: "missing file", create: false, wantErr: true},
 	}
 
@@ -920,9 +920,9 @@ func RunLocalUDPServer(laddr string) (*dns.Server, error) {
 func BenchmarkLeadAuthority(b *testing.B) {
 	handler := newDNSHandler(&config{
 		Authorities: []authority{
-			{DnsServer: "8.8.8.8", DnsPort: 53, DnsProtocol: "udp", Timeout: 2},
-			{DnsServer: "8.8.4.4", DnsPort: 53, DnsProtocol: "udp", Timeout: 2, DomainName: "google.fr"},
-			{DnsServer: "1.1.1.1", DnsPort: 53, DnsProtocol: "udp", Timeout: 2, DomainName: "toto.com"},
+			{DNSServer: "8.8.8.8", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "8.8.4.4", DNSPort: 53, DNSProtocol: "udp", Timeout: 2, DomainName: "google.fr"},
+			{DNSServer: "1.1.1.1", DNSPort: 53, DNSProtocol: "udp", Timeout: 2, DomainName: "toto.com"},
 		},
 	})
 
@@ -957,22 +957,22 @@ func BenchmarkResolveDnsQueryCacheHit(b *testing.B) {
 
 	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
 	server := &dnsServer{
-		DnsServer:   "127.0.0.1",
-		DnsPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
-		DnsProtocol: "udp",
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
 		Timeout:     4,
 	}
 	msg := &dns.Msg{Question: []dns.Question{{Name: "bench.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 
 	// Prime the cache so the benchmark measures the hit path
-	if _, err := resolveDnsQuery(client, msg, time.Hour, server); err != nil {
+	if _, err := resolveDNSQuery(client, msg, time.Hour, server); err != nil {
 		b.Fatal(err)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := resolveDnsQuery(client, msg, time.Hour, server); err != nil {
+		if _, err := resolveDNSQuery(client, msg, time.Hour, server); err != nil {
 			b.Fatal(err)
 		}
 	}

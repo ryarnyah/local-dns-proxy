@@ -31,16 +31,16 @@ var (
 )
 
 type dnsServer struct {
-	DnsServer   string `yaml:"dnsServer"`
-	DnsPort     int    `yaml:"dnsPort"`
-	DnsProtocol string `yaml:"dnsProtocol"`
+	DNSServer   string `yaml:"dnsServer"`
+	DNSPort     int    `yaml:"dnsPort"`
+	DNSProtocol string `yaml:"dnsProtocol"`
 	Timeout     int    `yaml:"timeout"`
 }
 
 type authority struct {
-	DnsServer   string `yaml:"dnsServer"`
-	DnsPort     int    `yaml:"dnsPort"`
-	DnsProtocol string `yaml:"dnsProtocol"`
+	DNSServer   string `yaml:"dnsServer"`
+	DNSPort     int    `yaml:"dnsPort"`
+	DNSProtocol string `yaml:"dnsProtocol"`
 	Timeout     int    `yaml:"timeout"`
 	DomainName  string `yaml:"domainName"`
 }
@@ -74,14 +74,14 @@ func newDNSHandler(cfg *config) *dnsHandler {
 	for _, authority := range cfg.Authorities {
 		handler.authorities = append(handler.authorities, resolvedAuthority{
 			server: dnsServer{
-				DnsServer:   authority.DnsServer,
-				DnsPort:     authority.DnsPort,
-				DnsProtocol: authority.DnsProtocol,
+				DNSServer:   authority.DNSServer,
+				DNSPort:     authority.DNSPort,
+				DNSProtocol: authority.DNSProtocol,
 				Timeout:     authority.Timeout,
 			},
 			domain: canonicalName(authority.DomainName),
 			client: &dns.Client{
-				Net:     authority.DnsProtocol,
+				Net:     authority.DNSProtocol,
 				Timeout: time.Duration(authority.Timeout) * time.Second,
 				UDPSize: 4096,
 			},
@@ -161,11 +161,11 @@ func (a *resolvedAuthority) matchesDomain(qname string, specific bool) bool {
 
 func cacheKey(server *dnsServer, question dns.Question) string {
 	var b strings.Builder
-	b.Grow(len(server.DnsServer) + len(question.Name) + 24)
+	b.Grow(len(server.DNSServer) + len(question.Name) + 24)
 	b.WriteString("question:")
-	b.WriteString(server.DnsServer)
+	b.WriteString(server.DNSServer)
 	b.WriteByte(':')
-	b.WriteString(strconv.Itoa(server.DnsPort))
+	b.WriteString(strconv.Itoa(server.DNSPort))
 	b.WriteByte(':')
 	b.WriteString(canonicalName(question.Name))
 	b.WriteByte(':')
@@ -175,7 +175,7 @@ func cacheKey(server *dnsServer, question dns.Question) string {
 	return b.String()
 }
 
-func resolveDnsQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
+func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
 	// Build the reply directly instead of copying the whole request: the
 	// question section is shared read-only and answers are appended below.
 	dnsResp := &dns.Msg{
@@ -200,7 +200,7 @@ func resolveDnsQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 				msg.Answer = []dns.RR{}
 				log.Debugf("execute %s", question.String())
 
-				resp, _, err := client.Exchange(msg, fmt.Sprintf("%s:%d", server.DnsServer, server.DnsPort))
+				resp, _, err := client.Exchange(msg, fmt.Sprintf("%s:%d", server.DNSServer, server.DNSPort))
 				if err != nil {
 					return nil, fmt.Errorf("unable to get info msg %s", err)
 				}
@@ -253,7 +253,7 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	dnsResp, err := resolveDnsQuery(server.client, r, handler.config.CacheTTL, &server.server)
+	dnsResp, err := resolveDNSQuery(server.client, r, handler.config.CacheTTL, &server.server)
 	if err != nil {
 		log.Errorf("unable to find resolve dns query for %s : %s", questionDomain, err)
 		return
@@ -287,17 +287,17 @@ func loadConfig() (*config, error) {
 	}
 
 	for i, authority := range cfg.Authorities {
-		if authority.DnsServer == "" {
+		if authority.DNSServer == "" {
 			return nil, fmt.Errorf("authority %d: dnsServer is required", i)
 		}
-		if authority.DnsPort < 1 || authority.DnsPort > 65535 {
-			return nil, fmt.Errorf("authority %d (%s): invalid dnsPort %d", i, authority.DnsServer, authority.DnsPort)
+		if authority.DNSPort < 1 || authority.DNSPort > 65535 {
+			return nil, fmt.Errorf("authority %d (%s): invalid dnsPort %d", i, authority.DNSServer, authority.DNSPort)
 		}
-		if authority.DnsProtocol != "udp" && authority.DnsProtocol != "tcp" {
-			return nil, fmt.Errorf("authority %d (%s): invalid dnsProtocol %q", i, authority.DnsServer, authority.DnsProtocol)
+		if authority.DNSProtocol != "udp" && authority.DNSProtocol != "tcp" {
+			return nil, fmt.Errorf("authority %d (%s): invalid dnsProtocol %q", i, authority.DNSServer, authority.DNSProtocol)
 		}
 		if authority.Timeout <= 0 {
-			return nil, fmt.Errorf("authority %d (%s): timeout must be greater than 0", i, authority.DnsServer)
+			return nil, fmt.Errorf("authority %d (%s): timeout must be greater than 0", i, authority.DNSServer)
 		}
 	}
 

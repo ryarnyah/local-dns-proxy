@@ -36,12 +36,12 @@ build: $(BINARIES) ## Builds a dynamic executable or package
 
 $(BINARIES): VERSION.txt
 	@echo "+ $@"
-	GO111MODULE=on CGO_ENABLED=0 go build -tags "$(BUILDTAGS)" $(call GO_LDFLAGS,$@) -o $@ $(BASE_BINARIES)
+	CGO_ENABLED=0 go build -tags "$(BUILDTAGS)" $(call GO_LDFLAGS,$@) -o $@ $(BASE_BINARIES)
 
 .PHONY: static
 static: ## Builds a static executable
 	@echo "+ $@"
-	$(foreach BINARY,$(BINARIES),GO111MODULE=on CGO_ENABLED=0 go build -tags "$(BUILDTAGS) static_build" $(call GO_LDFLAGS_STATIC $(BINARY)) -o $(BINARY) $(BASE_BINARIES)/$(BINARY))
+	$(foreach BINARY,$(BINARIES),CGO_ENABLED=0 go build -tags "$(BUILDTAGS) static_build" $(call GO_LDFLAGS_STATIC $(BINARY)) -o $(BINARY) $(BASE_BINARIES)/$(BINARY))
 
 .PHONY: fmt
 fmt: ## Verifies all files have men `gofmt`ed
@@ -81,7 +81,7 @@ cover: ## Runs go test with coverage
 
 define buildpretty
 mkdir -p $(BUILDDIR)/$(1)/$(2);
-GOOS=$(1) GOARCH=$(2) GO111MODULE=on CGO_ENABLED=0 go build \
+GOOS=$(1) GOARCH=$(2) CGO_ENABLED=0 go build \
 	 -o $(BUILDDIR)/$(1)/$(2)/$(3)$(if $(findstring windows, $(1)),.exe) \
 	 -a -tags "$(BUILDTAGS) static_build netgo" \
 	 -installsuffix netgo $(call GO_LDFLAGS_STATIC,$3) $(BASE_BINARIES)/$(3);
@@ -95,7 +95,7 @@ cross: VERSION.txt ## Builds the cross-compiled binaries, creating a clean direc
 	$(foreach BINARY,$(BINARIES), $(foreach GOOSARCH,$(GOOSARCHES), $(call buildpretty,$(subst /,,$(dir $(GOOSARCH))),$(notdir $(GOOSARCH)),$(BINARY))))
 
 define buildrelease
-GOOS=$(1) GOARCH=$(2) GO111MODULE=on CGO_ENABLED=0 go build \
+GOOS=$(1) GOARCH=$(2) CGO_ENABLED=0 go build \
 	 -o $(BUILDDIR)/$(3)-$(1)-$(2)$(if $(findstring windows, $(1)),.exe) \
 	 -a -tags "$(BUILDTAGS) static_build netgo" \
 	 -installsuffix netgo $(call GO_LDFLAGS_STATIC,$3) $(BASE_BINARIES);
