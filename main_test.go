@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -932,6 +933,38 @@ func BenchmarkLeadAuthority(b *testing.B) {
 		if _, err := handler.leadAuthority("dev.google.fr"); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// Worst case for randomness: every configured authority is a default one,
+// so all match and the reservoir sampler draws rand.IntN per match.
+func BenchmarkLeadAuthorityAllDefaults(b *testing.B) {
+	handler := newDNSHandler(&config{
+		Authorities: []authority{
+			{DNSServer: "8.8.8.8", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "8.8.4.4", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "1.1.1.1", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "9.9.9.9", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "208.67.222.222", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "208.67.220.220", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "64.6.64.6", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+			{DNSServer: "77.88.8.8", DNSPort: 53, DNSProtocol: "udp", Timeout: 2},
+		},
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := handler.leadAuthority("dev.google.fr"); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRandIntN(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = rand.IntN(8)
 	}
 }
 

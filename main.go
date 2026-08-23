@@ -114,31 +114,21 @@ func (handler *dnsHandler) leadAuthority(qname string) (*resolvedAuthority, erro
 }
 
 func (handler *dnsHandler) pickAuthority(qname string, specific bool) *resolvedAuthority {
-	count := 0
+	var chosen *resolvedAuthority
+	matches := 0
 	for i := range handler.authorities {
 		a := &handler.authorities[i]
-		if a.matchesDomain(qname, specific) {
-			count++
+		if !a.matchesDomain(qname, specific) {
+			continue
+		}
+		matches++
+		// Reservoir sampling (k=1): uniformly selects one match in a
+		// single pass.
+		if matches == 1 || rand.IntN(matches) == 0 {
+			chosen = a
 		}
 	}
-	if count == 0 {
-		return nil
-	}
-	pick := 0
-	if count > 1 {
-		pick = rand.IntN(count)
-	}
-	seen := 0
-	for i := range handler.authorities {
-		a := &handler.authorities[i]
-		if a.matchesDomain(qname, specific) {
-			if seen == pick {
-				return a
-			}
-			seen++
-		}
-	}
-	return nil
+	return chosen
 }
 
 // subDomainOf reports whether qname equals parent or is a child of it.
