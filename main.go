@@ -26,7 +26,11 @@ const (
 )
 
 var (
-	cache    = ccache.New(ccache.Configure())
+	cache = ccache.New(
+		ccache.Configure().
+			Buckets(64).        // spread bucket-lock contention
+			GetsPerPromote(64), // throttle promote-channel traffic on hot keys
+	)
 	inflight singleflight.Group
 )
 
@@ -164,6 +168,22 @@ func cacheKey(server *dnsServer, question dns.Question) string {
 	return b.String()
 }
 
+// cachedFetch serves hits without any global lock; singleflight only
+// serializes concurrent misses for the same key into one upstream exchange.
+func cachedFetch(key string, cacheTTL time.Duration, fetch func() (interface{}, error)) (interface{}, error) {
+	if item := cache.Get(key); item != nil && !item.Expired() {
+		return item.Value(), nil
+	}
+	value, err, _ := inflight.Do(key, func() (interface{}, error) {
+		item, err := cache.Fetch(key, cacheTTL, fetch)
+		if err != nil {
+			return nil, err
+		}
+		return item.Value(), nil
+	})
+	return value, err
+}
+
 func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
 	// Build the reply directly instead of copying the whole request: the
 	// question section is shared read-only and answers are appended below.
@@ -178,27 +198,19 @@ func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 
 	for _, question := range r.Question {
 		key := cacheKey(server, question)
-		value, err, _ := inflight.Do(key, func() (interface{}, error) {
-			// Singleflight collapses concurrent misses for the same
-			// key into one upstream exchange.
-			item, err := cache.Fetch(key, cacheTTL, func() (interface{}, error) {
-				msg := r.Copy()
-				msg.Question = []dns.Question{
-					question,
-				}
-				msg.Answer = []dns.RR{}
-				log.Debugf("execute %s", question.String())
-
-				resp, _, err := client.Exchange(msg, fmt.Sprintf("%s:%d", server.DNSServer, server.DNSPort))
-				if err != nil {
-					return nil, fmt.Errorf("unable to get info msg %s", err)
-				}
-				return resp, nil
-			})
-			if err != nil {
-				return nil, err
+		value, err := cachedFetch(key, cacheTTL, func() (interface{}, error) {
+			msg := r.Copy()
+			msg.Question = []dns.Question{
+				question,
 			}
-			return item.Value().(*dns.Msg), nil
+			msg.Answer = []dns.RR{}
+			log.Debugf("execute %s", question.String())
+
+			resp, _, err := client.Exchange(msg, fmt.Sprintf("%s:%d", server.DNSServer, server.DNSPort))
+			if err != nil {
+				return nil, fmt.Errorf("unable to get info msg %s", err)
+			}
+			return resp, nil
 		})
 		if err != nil {
 			log.Errorf("%s", err)

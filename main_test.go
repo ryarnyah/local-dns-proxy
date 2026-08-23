@@ -1011,6 +1011,51 @@ func BenchmarkResolveDnsQueryCacheHit(b *testing.B) {
 	}
 }
 
+// Parallel variant: reveals contention in the cache layer.
+func BenchmarkResolveDnsQueryCacheHitParallel(b *testing.B) {
+	s, err := RunLocalUDPServer("127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("unable to run test server: %v", err)
+	}
+	defer func() { _ = s.Shutdown() }()
+
+	dns.HandleFunc("bench.test.", func(w dns.ResponseWriter, req *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(req)
+		m.Answer = []dns.RR{
+			&dns.A{
+				Hdr: dns.RR_Header{Name: m.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   net.ParseIP("127.0.0.1"),
+			},
+		}
+		_ = w.WriteMsg(m)
+	})
+	defer dns.HandleRemove("bench.test.")
+
+	client := &dns.Client{Net: "udp", Timeout: 5 * time.Second, UDPSize: 4096}
+	server := &dnsServer{
+		DNSServer:   "127.0.0.1",
+		DNSPort:     s.PacketConn.LocalAddr().(*net.UDPAddr).Port,
+		DNSProtocol: "udp",
+		Timeout:     4,
+	}
+	msg := &dns.Msg{Question: []dns.Question{{Name: "bench.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
+
+	if _, err := resolveDNSQuery(client, msg, time.Hour, server); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if _, err := resolveDNSQuery(client, msg, time.Hour, server); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 func RunLocalTCPServer(laddr string) (*dns.Server, error) {
 	ln, err := net.Listen("tcp", laddr)
 	if err != nil {
