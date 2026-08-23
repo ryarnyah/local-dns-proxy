@@ -77,9 +77,10 @@ type dnsHandler struct {
 // resolvedAuthority is an authority prepared at startup: its domain is
 // canonicalized and its client pre-built so queries need no setup work.
 type resolvedAuthority struct {
-	server dnsServer
-	domain string
-	client *dns.Client
+	server    dnsServer
+	domain    string
+	client    *dns.Client
+	keyPrefix string
 }
 
 // newDNSHandler builds a handler from cfg, precomputing canonical domain
@@ -87,19 +88,21 @@ type resolvedAuthority struct {
 func newDNSHandler(cfg *config) *dnsHandler {
 	handler := &dnsHandler{config: cfg}
 	for _, authority := range cfg.Authorities {
+		server := dnsServer{
+			DNSServer:   authority.DNSServer,
+			DNSPort:     authority.DNSPort,
+			DNSProtocol: authority.DNSProtocol,
+			Timeout:     authority.Timeout,
+		}
 		handler.authorities = append(handler.authorities, resolvedAuthority{
-			server: dnsServer{
-				DNSServer:   authority.DNSServer,
-				DNSPort:     authority.DNSPort,
-				DNSProtocol: authority.DNSProtocol,
-				Timeout:     authority.Timeout,
-			},
+			server: server,
 			domain: canonicalName(authority.DomainName),
 			client: &dns.Client{
 				Net:     authority.DNSProtocol,
 				Timeout: time.Duration(authority.Timeout) * time.Second,
 				UDPSize: 4096,
 			},
+			keyPrefix: serverKeyPrefix(&server),
 		})
 	}
 	return handler
@@ -174,22 +177,25 @@ func (a *resolvedAuthority) matchesDomain(qname string, specific bool) bool {
 	return a.domain == ""
 }
 
+// serverKeyPrefix builds the constant part of the cache key for one
+// upstream server, so it can be precomputed once instead of per query.
+func serverKeyPrefix(server *dnsServer) string {
+	return "question:" + server.DNSServer + ":" + strconv.Itoa(server.DNSPort) + ":"
+}
+
 // cacheKey builds the cache key for a single question against one
 // upstream server, so answers from different authorities and record
-// types never collide.
-func cacheKey(server *dnsServer, question dns.Question) string {
+// types never collide. It performs exactly one allocation.
+func cacheKey(keyPrefix string, question dns.Question) string {
+	name := canonicalName(question.Name)
 	var b strings.Builder
-	b.Grow(len(server.DNSServer) + len(question.Name) + 24)
-	b.WriteString("question:")
-	b.WriteString(server.DNSServer)
+	b.Grow(len(keyPrefix) + len(name) + 16)
+	b.WriteString(keyPrefix)
+	b.WriteString(name)
+	var scratch [20]byte
+	b.Write(strconv.AppendInt(scratch[:0], int64(question.Qtype), 10))
 	b.WriteByte(':')
-	b.WriteString(strconv.Itoa(server.DNSPort))
-	b.WriteByte(':')
-	b.WriteString(canonicalName(question.Name))
-	b.WriteByte(':')
-	b.WriteString(strconv.Itoa(int(question.Qtype)))
-	b.WriteByte(':')
-	b.WriteString(strconv.Itoa(int(question.Qclass)))
+	b.Write(strconv.AppendInt(scratch[:0], int64(question.Qclass), 10))
 	return b.String()
 }
 
@@ -213,23 +219,23 @@ func cachedFetch(key string, cacheTTL time.Duration, fetch func() (*dns.Msg, err
 }
 
 // resolveDNSQuery answers every question in r by consulting the cache
-// (fetching from server on miss) and merging the answers into a reply.
-// Upstream failures yield a SERVFAIL reply; upstream rcodes such as
-// NXDOMAIN are propagated as-is.
-func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer) (*dns.Msg, error) {
+// (fetching from the upstream server on miss) and merging the answers
+// into a reply. Upstream failures yield a SERVFAIL reply; upstream
+// rcodes such as NXDOMAIN are propagated as-is.
+func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, server *dnsServer, keyPrefix string) (*dns.Msg, error) {
 	// Build the reply directly instead of copying the whole request: the
 	// question section is shared read-only and answers are appended below.
 	dnsResp := &dns.Msg{
 		MsgHdr:   r.MsgHdr,
 		Compress: true,
 		Question: r.Question,
-		Answer:   []dns.RR{},
+		Answer:   make([]dns.RR, 0, len(r.Question)),
 	}
 	dnsResp.Response = true
 	// Compress responses: smaller UDP payloads mean fewer IP fragments.
 
 	for _, question := range r.Question {
-		key := cacheKey(server, question)
+		key := cacheKey(keyPrefix, question)
 		upstream, err := cachedFetch(key, cacheTTL, func() (*dns.Msg, error) {
 			msg := r.Copy()
 			msg.Question = []dns.Question{
@@ -288,7 +294,7 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	dnsResp, err := resolveDNSQuery(server.client, r, handler.config.CacheTTL, &server.server)
+	dnsResp, err := resolveDNSQuery(server.client, r, handler.config.CacheTTL, &server.server, server.keyPrefix)
 	if err != nil {
 		log.Errorf("unable to find resolve dns query for %s : %s", questionDomain, err)
 		return
