@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin/v2"
-	"github.com/karlseguin/ccache"
+	"github.com/karlseguin/ccache/v3"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/singleflight"
@@ -26,8 +26,8 @@ const (
 )
 
 var (
-	cache = ccache.New(
-		ccache.Configure().
+	cache = ccache.New[*dns.Msg](
+		ccache.Configure[*dns.Msg]().
 			Buckets(64).        // spread bucket-lock contention
 			GetsPerPromote(64), // throttle promote-channel traffic on hot keys
 	)
@@ -195,7 +195,7 @@ func cacheKey(server *dnsServer, question dns.Question) string {
 
 // cachedFetch serves hits without any global lock; singleflight only
 // serializes concurrent misses for the same key into one upstream exchange.
-func cachedFetch(key string, cacheTTL time.Duration, fetch func() (interface{}, error)) (interface{}, error) {
+func cachedFetch(key string, cacheTTL time.Duration, fetch func() (*dns.Msg, error)) (*dns.Msg, error) {
 	if item := cache.Get(key); item != nil && !item.Expired() {
 		return item.Value(), nil
 	}
@@ -206,7 +206,10 @@ func cachedFetch(key string, cacheTTL time.Duration, fetch func() (interface{}, 
 		}
 		return item.Value(), nil
 	})
-	return value, err
+	if err != nil {
+		return nil, err
+	}
+	return value.(*dns.Msg), nil
 }
 
 // resolveDNSQuery answers every question in r by consulting the cache
@@ -227,7 +230,7 @@ func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 
 	for _, question := range r.Question {
 		key := cacheKey(server, question)
-		value, err := cachedFetch(key, cacheTTL, func() (interface{}, error) {
+		upstream, err := cachedFetch(key, cacheTTL, func() (*dns.Msg, error) {
 			msg := r.Copy()
 			msg.Question = []dns.Question{
 				question,
@@ -247,7 +250,6 @@ func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 			dnsResp.Answer = nil
 			break
 		}
-		upstream := value.(*dns.Msg)
 		dnsResp.Rcode = upstream.Rcode
 		dnsResp.RecursionAvailable = upstream.RecursionAvailable
 		dnsResp.Answer = append(dnsResp.Answer, upstream.Answer...)
