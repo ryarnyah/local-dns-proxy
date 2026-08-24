@@ -25,9 +25,12 @@ const (
 	configFilename = "config.yaml"
 )
 
-// Cache sizing defaults, overridable from config.yaml.
+// Cache sizing defaults, overridable from config.yaml. 16384 entries
+// cost a few megabytes at most while giving busy LAN gateways a high
+// hit rate; being a power of two it divides evenly into any legal
+// shard count.
 const (
-	defaultCacheMaxEntries = 5000
+	defaultCacheMaxEntries = 16384
 	defaultCacheShards     = 64
 	maxCacheShards         = 4096
 )
@@ -46,12 +49,15 @@ type cacheShard struct {
 }
 
 // dnsCache is a sharded TTL cache for upstream answers. maphash keeps
-// lookups allocation-free; shard count must be a power of two.
+// lookups allocation-free; shard count must be a power of two. The
+// configured capacity is honored exactly: shards get base entries each,
+// and the first remainder shards one more.
 type dnsCache struct {
-	seed   maphash.Seed
-	shards []cacheShard
-	mask   uint64
-	limit  int // per-shard entry cap
+	seed      maphash.Seed
+	shards    []cacheShard
+	mask      uint64
+	baseLimit int // per-shard entry cap, before remainder spread
+	remainder int // first N shards take one extra entry
 }
 
 // newDNSCache builds a cache from cfg; zero fields fall back to the
@@ -66,15 +72,26 @@ func newDNSCache(cfg cacheConfig) *dnsCache {
 		maxEntries = defaultCacheMaxEntries
 	}
 	c := &dnsCache{
-		seed:   maphash.MakeSeed(),
-		shards: make([]cacheShard, shards),
-		mask:   uint64(shards - 1),
-		limit:  max(1, maxEntries/shards),
+		seed:      maphash.MakeSeed(),
+		shards:    make([]cacheShard, shards),
+		mask:      uint64(shards - 1),
+		baseLimit: max(1, maxEntries/shards),
+		remainder: maxEntries % shards,
 	}
 	for i := range c.shards {
 		c.shards[i].items = make(map[string]cacheEntry, 8)
 	}
 	return c
+}
+
+// limitFor returns the exact entry cap of shard idx, so the sum across
+// shards equals the configured maxEntries even when it is not a
+// multiple of the shard count.
+func (c *dnsCache) limitFor(idx int) int {
+	if idx < c.remainder {
+		return c.baseLimit + 1
+	}
+	return c.baseLimit
 }
 
 // shard selects the lock domain for a key; on the query hot path this
@@ -109,15 +126,18 @@ func (c *dnsCache) set(key string, msg *dns.Msg, ttl time.Duration) {
 	if ttl <= 0 {
 		return
 	}
-	s := c.shard(key)
+	h := maphash.String(c.seed, key)
+	idx := int(h & c.mask)
+	s := &c.shards[idx]
+	limit := c.limitFor(idx)
 	now := time.Now().UnixNano()
 	s.mu.Lock()
-	if len(s.items) >= c.limit {
+	if len(s.items) >= limit {
 		for k, e := range s.items {
 			if e.expires < now {
 				delete(s.items, k)
 			}
-			if len(s.items) < c.limit {
+			if len(s.items) < limit {
 				break
 			}
 		}

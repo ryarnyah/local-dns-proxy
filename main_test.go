@@ -989,6 +989,30 @@ func TestCacheEviction(t *testing.T) {
 	}
 }
 
+// The configured capacity must be honored exactly across shards even
+// when maxEntries does not divide by the shard count.
+func TestCacheCapacityExact(t *testing.T) {
+	const maxEntries, shards = 10, 4 // deliberately not a multiple
+	c := newDNSCache(cacheConfig{MaxEntries: maxEntries, Shards: shards})
+	if c.limitFor(0) != 3 || c.limitFor(3) != 2 {
+		t.Fatalf("remainder spread wrong: limitFor(0)=%d limitFor(3)=%d", c.limitFor(0), c.limitFor(3))
+	}
+
+	msg := &dns.Msg{}
+	for i := 0; i < 50; i++ { // far beyond capacity
+		c.set(fmt.Sprintf("e%d", i), msg, time.Minute)
+	}
+	total := 0
+	for i := range c.shards {
+		c.shards[i].mu.RLock()
+		total += len(c.shards[i].items)
+		c.shards[i].mu.RUnlock()
+	}
+	if total > maxEntries {
+		t.Errorf("capacity not honored exactly: %d entries stored, want ≤ %d", total, maxEntries)
+	}
+}
+
 // Direct unit coverage of the cache primitives: misses, roundtrips,
 // lazy expiry deletion and ttl<=0 handling.
 func TestDNSCacheBasics(t *testing.T) {
