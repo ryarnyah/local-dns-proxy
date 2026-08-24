@@ -58,6 +58,16 @@ test: ## Runs the go tests
 	@echo "+ $@"
 	@go test -v -tags "$(BUILDTAGS) cgo" $(shell go list ./... | grep -v vendor)
 
+# Tunables for make bench (e.g. make bench BENCH=BenchmarkLeadAuthority COUNT=5)
+BENCH ?= .
+BENCHTIME ?= 1s
+BENCHCOUNT ?= 1
+
+.PHONY: bench
+bench: ## Runs the go benchmarks
+	@echo "+ $@"
+	@go test -run XXX -bench "$(BENCH)" -benchtime "$(BENCHTIME)" -count "$(BENCHCOUNT)" $(shell go list ./... | grep -v vendor)
+
 .PHONY: vet
 vet: ## Verifies `go vet` passes
 	@echo "+ $@"
