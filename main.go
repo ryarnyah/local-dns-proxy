@@ -171,6 +171,44 @@ type dnsServer struct {
 	DNSPort     int    `yaml:"dnsPort"`
 	DNSProtocol string `yaml:"dnsProtocol"`
 	Timeout     int    `yaml:"timeout"`
+
+	// pool is set by newDNSHandler for UDP upstreams so misses reuse
+	// sockets instead of dialing per query; hand-built configs leave it
+	// nil, which selects the legacy dial-per-exchange path.
+	pool *connPool
+}
+
+// connPool is a capped pool of live connections to one upstream. Each
+// connection is owned by a single exchange at a time; overflow and
+// error paths close sockets instead of recycling them.
+type connPool struct {
+	ch   chan *dns.Conn
+	addr string
+}
+
+const maxPooledConns = 64
+
+func newConnPool(addr string) *connPool {
+	return &connPool{ch: make(chan *dns.Conn, maxPooledConns), addr: addr}
+}
+
+// get recycles a pooled connection or dials a fresh one.
+func (p *connPool) get(client *dns.Client) (*dns.Conn, error) {
+	select {
+	case conn := <-p.ch:
+		return conn, nil
+	default:
+	}
+	return client.Dial(p.addr)
+}
+
+// put returns a healthy connection to the pool, closing it when full.
+func (p *connPool) put(conn *dns.Conn) {
+	select {
+	case p.ch <- conn:
+	default:
+		conn.Close()
+	}
 }
 
 // authority is a configured upstream DNS server, optionally scoped to a
@@ -242,6 +280,9 @@ func newDNSHandler(cfg *config) *dnsHandler {
 			DNSPort:     authority.DNSPort,
 			DNSProtocol: authority.DNSProtocol,
 			Timeout:     authority.Timeout,
+		}
+		if server.DNSProtocol == "udp" {
+			server.pool = newConnPool(server.addr())
 		}
 		handler.authorities = append(handler.authorities, resolvedAuthority{
 			server: server,
@@ -407,7 +448,26 @@ func resolveDNSQuery(client *dns.Client, r *dns.Msg, cacheTTL time.Duration, ser
 			}
 			log.Debugf("execute %s", question.String())
 
-			resp, _, err := client.Exchange(msg, upstreamAddr)
+			var (
+				resp *dns.Msg
+				err  error
+			)
+			if server.pool != nil {
+				// Reuse a live socket; on error the connection is
+				// discarded since its state can no longer be trusted.
+				conn, derr := server.pool.get(client)
+				if derr != nil {
+					return nil, fmt.Errorf("unable to dial %s: %w", upstreamAddr, derr)
+				}
+				resp, _, err = client.ExchangeWithConn(msg, conn)
+				if err != nil {
+					conn.Close()
+				} else {
+					server.pool.put(conn)
+				}
+			} else {
+				resp, _, err = client.Exchange(msg, upstreamAddr)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("unable to get info msg %s", err)
 			}

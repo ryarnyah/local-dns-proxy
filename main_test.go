@@ -1416,6 +1416,7 @@ func BenchmarkResolveDnsQueryMiss(b *testing.B) {
 		DNSProtocol: "udp",
 		Timeout:     4,
 	}
+	server.pool = newConnPool(server.addr())
 	msg := &dns.Msg{Question: []dns.Question{{Name: "miss.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	prefix := serverKeyPrefix(server)
 	addr := server.addr()
