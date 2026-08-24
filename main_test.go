@@ -149,7 +149,7 @@ func TestResolveDnsQuery(t *testing.T) {
 
 	msg := &dns.Msg{}
 
-	dMsg, err := resolveDNSQuery(client, msg, 0, dnsServer, serverKeyPrefix(dnsServer))
+	dMsg, err := resolveDNSQuery(client, msg, 0, dnsServer, serverKeyPrefix(dnsServer), dnsServer.addr())
 	if err != nil {
 		t.Fail()
 	}
@@ -179,7 +179,7 @@ func TestResolveDnsQuery(t *testing.T) {
 			},
 		},
 	}
-	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer))
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer), dnsServer.addr())
 	if err != nil {
 		t.Fail()
 	}
@@ -191,7 +191,7 @@ func TestResolveDnsQuery(t *testing.T) {
 	}
 	dns.HandleRemove("toto.com.")
 	// Test cache without handler
-	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer))
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer), dnsServer.addr())
 	if err != nil {
 		t.Fail()
 	}
@@ -215,7 +215,7 @@ func TestResolveDnsQuery(t *testing.T) {
 
 	dnsServer.DNSServer = "127.0.0.2"
 
-	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer))
+	dMsg, err = resolveDNSQuery(client, msg, 1*time.Minute, dnsServer, serverKeyPrefix(dnsServer), dnsServer.addr())
 	if err != nil {
 		t.Error(err)
 	}
@@ -264,20 +264,20 @@ func TestResolveDnsQueryQTypeIsolation(t *testing.T) {
 	aMsg := &dns.Msg{Question: []dns.Question{{Name: "dual.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	aaaaMsg := &dns.Msg{Question: []dns.Question{{Name: "dual.test.", Qtype: dns.TypeAAAA, Qclass: dns.ClassINET}}}
 
-	respA, err := resolveDNSQuery(client, aMsg, time.Minute, server, serverKeyPrefix(server))
+	respA, err := resolveDNSQuery(client, aMsg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
-	respAAAA, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server, serverKeyPrefix(server))
+	respAAAA, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Second round must be served from cache without mixing types
-	respA2, err := resolveDNSQuery(client, aMsg, time.Minute, server, serverKeyPrefix(server))
+	respA2, err := resolveDNSQuery(client, aMsg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
-	respAAAA2, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server, serverKeyPrefix(server))
+	respAAAA2, err := resolveDNSQuery(client, aaaaMsg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestResolveDnsQueryNXDOMAINPropagation(t *testing.T) {
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "nx.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server))
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestResolveDnsQueryCNAMEChain(t *testing.T) {
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "alias.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server))
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,10 +416,10 @@ func TestCacheTTLExpiry(t *testing.T) {
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "ttl.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 
-	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server)); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server), server.addr()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server)); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server), server.addr()); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -430,7 +430,7 @@ func TestCacheTTLExpiry(t *testing.T) {
 	mu.Unlock()
 
 	time.Sleep(150 * time.Millisecond)
-	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server)); err != nil {
+	if _, err := resolveDNSQuery(client, msg, 80*time.Millisecond, server, serverKeyPrefix(server), server.addr()); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -470,7 +470,7 @@ func TestCacheDisabled(t *testing.T) {
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "nocache.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	for i := 0; i < 3; i++ {
-		if _, err := resolveDNSQuery(client, msg, 0, server, serverKeyPrefix(server)); err != nil {
+		if _, err := resolveDNSQuery(client, msg, 0, server, serverKeyPrefix(server), server.addr()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -573,7 +573,7 @@ func TestResolveDnsQueryOverTCP(t *testing.T) {
 	}
 
 	msg := &dns.Msg{Question: []dns.Question{{Name: "tcp.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
-	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server))
+	dMsg, err := resolveDNSQuery(client, msg, time.Minute, server, serverKeyPrefix(server), server.addr())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +610,7 @@ func TestUpstreamTimeout(t *testing.T) {
 	msg := &dns.Msg{Question: []dns.Question{{Name: "slow.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 
 	start := time.Now()
-	dMsg, err := resolveDNSQuery(client, msg, 0, server, serverKeyPrefix(server))
+	dMsg, err := resolveDNSQuery(client, msg, 0, server, serverKeyPrefix(server), server.addr())
 	elapsed := time.Since(start)
 
 	if elapsed > 3*time.Second {
@@ -1235,16 +1235,17 @@ func BenchmarkResolveDnsQueryCacheHit(b *testing.B) {
 	}
 	msg := &dns.Msg{Question: []dns.Question{{Name: "bench.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	prefix := serverKeyPrefix(server)
+	addr := server.addr()
 
 	// Prime the cache so the benchmark measures the hit path
-	if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix); err != nil {
+	if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix, addr); err != nil {
 		b.Fatal(err)
 	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix); err != nil {
+		if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix, addr); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -1280,8 +1281,9 @@ func BenchmarkResolveDnsQueryCacheHitParallel(b *testing.B) {
 	}
 	msg := &dns.Msg{Question: []dns.Question{{Name: "bench.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	prefix := serverKeyPrefix(server)
+	addr := server.addr()
 
-	if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix); err != nil {
+	if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix, addr); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1289,7 +1291,7 @@ func BenchmarkResolveDnsQueryCacheHitParallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix); err != nil {
+			if _, err := resolveDNSQuery(client, msg, time.Hour, server, prefix, addr); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -1416,11 +1418,12 @@ func BenchmarkResolveDnsQueryMiss(b *testing.B) {
 	}
 	msg := &dns.Msg{Question: []dns.Question{{Name: "miss.test.", Qtype: dns.TypeA, Qclass: dns.ClassINET}}}
 	prefix := serverKeyPrefix(server)
+	addr := server.addr()
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := resolveDNSQuery(client, msg, 0, server, prefix); err != nil {
+		if _, err := resolveDNSQuery(client, msg, 0, server, prefix, addr); err != nil {
 			b.Fatal(err)
 		}
 	}
