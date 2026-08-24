@@ -4,7 +4,6 @@ go 1.27.0
 
 require (
 	github.com/alecthomas/kong v1.16.1
-	github.com/karlseguin/ccache/v3 v3.0.8
 	github.com/miekg/dns v1.1.73
 	github.com/sirupsen/logrus v1.10.1
 	golang.org/x/sync v0.22.0

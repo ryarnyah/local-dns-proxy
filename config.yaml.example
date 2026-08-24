@@ -5,7 +5,11 @@ serverPort: 10053
 serverIP: 0.0.0.0
 # Protocole udp/tcp
 serverProtocol: udp
-cacheTTL: 1m
+# Cache des réponses upstream (tous les champs optionnels)
+cache:
+  ttl: 1m          # durée de rétention; 0 désactive le cache
+  maxEntries: 5000 # nombre maximal d'entrées
+  shards: 64       # puissance de deux
 # Serveurs DNS ne comprenants pas les résultats de authorities
 authorities:
   - domainName: toto.com

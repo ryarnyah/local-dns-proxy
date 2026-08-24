@@ -798,7 +798,42 @@ func TestLoadConfig(t *testing.T) {
 serverPort: 10053
 serverIP: 127.0.0.1
 serverProtocol: udp
-cacheTTL: 1m
+cache:
+  ttl: 1m
+  maxEntries: 2048
+  shards: 32
+authorities:
+  - dnsServer: 8.8.8.8
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
+`
+	legacyTTL := `---
+serverPort: 10053
+serverProtocol: udp
+cacheTTL: 2m
+authorities:
+  - dnsServer: 8.8.8.8
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
+`
+	oddShards := `---
+serverPort: 10053
+serverProtocol: udp
+cache:
+  shards: 63
+authorities:
+  - dnsServer: 8.8.8.8
+    dnsPort: 53
+    dnsProtocol: udp
+    timeout: 2
+`
+	negativeMaxEntries := `---
+serverPort: 10053
+serverProtocol: udp
+cache:
+  maxEntries: -1
 authorities:
   - dnsServer: 8.8.8.8
     dnsPort: 53
@@ -871,6 +906,7 @@ authorities:
 		wantErr bool
 	}{
 		{name: "valid", content: validConfig, create: true},
+		{name: "legacy cacheTTL", content: legacyTTL, create: true},
 		{name: "invalid yaml", content: invalidYaml, create: true, wantErr: true},
 		{name: "no authorities", content: noAuthorities, create: true, wantErr: true},
 		{name: "zero timeout", content: zeroTimeout, create: true, wantErr: true},
@@ -879,6 +915,8 @@ authorities:
 		{name: "empty dns server", content: emptyDNSServer, create: true, wantErr: true},
 		{name: "bad dns port", content: badDNSPort, create: true, wantErr: true},
 		{name: "bad dns protocol", content: badDNSProtocol, create: true, wantErr: true},
+		{name: "odd cache shards", content: oddShards, create: true, wantErr: true},
+		{name: "negative max entries", content: negativeMaxEntries, create: true, wantErr: true},
 		{name: "missing file", create: false, wantErr: true},
 	}
 
@@ -905,11 +943,187 @@ authorities:
 			if cfg.ServerPort != 10053 || len(cfg.Authorities) != 1 {
 				t.Errorf("unexpected config %+v", cfg)
 			}
-			if cfg.CacheTTL != time.Minute {
-				t.Errorf("unexpected cacheTTL %s", cfg.CacheTTL)
+			switch tt.name {
+			case "valid":
+				if cfg.Cache.TTL != time.Minute || cfg.Cache.MaxEntries != 2048 || cfg.Cache.Shards != 32 {
+					t.Errorf("unexpected cache config %+v", cfg.Cache)
+				}
+			case "legacy cacheTTL":
+				if cfg.Cache.TTL != 2*time.Minute {
+					t.Errorf("legacy cacheTTL not applied, got %s", cfg.Cache.TTL)
+				}
 			}
 		})
 	}
+}
+
+// Cache sizing from config must hold: entries beyond maxEntries evict
+// expired ones first, then arbitrary ones.
+func TestCacheEviction(t *testing.T) {
+	c := newDNSCache(cacheConfig{MaxEntries: 8, Shards: 1})
+	ttl := time.Minute
+
+	msg := &dns.Msg{}
+	for i := 0; i < 100; i++ {
+		c.set(fmt.Sprintf("k%d", i), msg, ttl)
+	}
+	if len(c.shards[0].items) > 8 {
+		t.Errorf("cache exceeded configured capacity: %d entries", len(c.shards[0].items))
+	}
+	// Most recent key must still be present.
+	if _, ok := c.get("k99"); !ok {
+		t.Error("most recent entry was evicted")
+	}
+
+	// Expired entries are reclaimable.
+	short := newDNSCache(cacheConfig{MaxEntries: 4, Shards: 1})
+	for i := 0; i < 10; i++ {
+		short.set(fmt.Sprintf("s%d", i), msg, time.Nanosecond)
+	}
+	time.Sleep(time.Millisecond)
+	for i := 0; i < 100; i++ {
+		short.set(fmt.Sprintf("n%d", i), msg, ttl)
+	}
+	if len(short.shards[0].items) > 4 {
+		t.Errorf("cache exceeded configured capacity: %d entries", len(short.shards[0].items))
+	}
+}
+
+// Direct unit coverage of the cache primitives: misses, roundtrips,
+// lazy expiry deletion and ttl<=0 handling.
+func TestDNSCacheBasics(t *testing.T) {
+	c := newDNSCache(cacheConfig{MaxEntries: 100, Shards: 4})
+	msg := &dns.Msg{}
+
+	// Miss on an empty cache.
+	if _, ok := c.get("missing"); ok {
+		t.Error("expected miss on empty cache")
+	}
+
+	// Roundtrip.
+	c.set("a", msg, time.Minute)
+	got, ok := c.get("a")
+	if !ok || got != msg {
+		t.Errorf("expected cached message, got ok=%v", ok)
+	}
+
+	// Expired entries report a miss AND are removed from the map.
+	c.set("b", msg, -time.Second) // already expired
+	if _, ok := c.get("b"); ok {
+		t.Error("expired entry must be a miss")
+	}
+	c.shards[0].mu.RLock()
+	_, stillThere := c.shards[0].items["b"]
+	c.shards[0].mu.RUnlock()
+	if stillThere {
+		t.Error("expired entry must be deleted lazily on read")
+	}
+
+	// ttl <= 0 disables storing.
+	c.set("c", msg, 0)
+	if _, ok := c.get("c"); ok {
+		t.Error("ttl=0 entries must not be stored")
+	}
+}
+
+// Both the new cache.ttl section and the deprecated top-level
+// cacheTTL must reach the handler.
+func TestEffectiveCacheTTL(t *testing.T) {
+	authorities := []authority{{DNSServer: "8.8.8.8", DNSPort: 53, DNSProtocol: "udp", Timeout: 2}}
+
+	h := newDNSHandler(&config{Cache: cacheConfig{TTL: time.Minute}, Authorities: authorities})
+	if h.effectiveCacheTTL != time.Minute {
+		t.Errorf("cache.ttl not honored, got %s", h.effectiveCacheTTL)
+	}
+	h = newDNSHandler(&config{CacheTTL: 2 * time.Minute, Authorities: authorities})
+	if h.effectiveCacheTTL != 2*time.Minute {
+		t.Errorf("legacy cacheTTL not honored, got %s", h.effectiveCacheTTL)
+	}
+	h = newDNSHandler(&config{
+		Cache:       cacheConfig{TTL: 3 * time.Minute},
+		CacheTTL:    2 * time.Minute,
+		Authorities: authorities,
+	})
+	if h.effectiveCacheTTL != 3*time.Minute {
+		t.Errorf("cache.ttl must win over legacy field, got %s", h.effectiveCacheTTL)
+	}
+}
+
+// configureCache swaps the global instance used by cachedFetch.
+func TestConfigureCache(t *testing.T) {
+	original := cache
+	defer func() { cache = original }()
+
+	small := newDNSCache(cacheConfig{MaxEntries: 1, Shards: 1})
+	cache = small
+
+	msgA, msgB := &dns.Msg{}, &dns.Msg{}
+	fetchCount := 0
+	fetch := func() (*dns.Msg, error) { fetchCount++; return msgA, nil }
+
+	if got, err := cachedFetch("x", time.Minute, fetch); err != nil || got != msgA {
+		t.Fatalf("first call must fetch and return msgA (err=%v)", err)
+	}
+	cache.set("y", msgB, time.Minute)
+	if got, _ := cache.get("y"); got != msgB {
+		t.Error("configured instance must store entries")
+	}
+	if fetchCount != 1 {
+		t.Errorf("unexpected upstream fetch count %d", fetchCount)
+	}
+}
+
+// Keys must spread across shards without losses.
+func TestCacheShardDistribution(t *testing.T) {
+	const shards = 8
+	c := newDNSCache(cacheConfig{MaxEntries: 1024, Shards: shards})
+	msg := &dns.Msg{}
+
+	const n = 500
+	for i := 0; i < n; i++ {
+		c.set(fmt.Sprintf("host%d.example.test.", i), msg, time.Minute)
+	}
+	total := 0
+	nonEmpty := 0
+	for i := range c.shards {
+		c.shards[i].mu.RLock()
+		total += len(c.shards[i].items)
+		if len(c.shards[i].items) > 0 {
+			nonEmpty++
+		}
+		c.shards[i].mu.RUnlock()
+	}
+	if total != n {
+		t.Errorf("lost entries across shards: %d stored, want %d", total, n)
+	}
+	if nonEmpty < shards/2 {
+		t.Errorf("keys not distributed: only %d/%d shards populated", nonEmpty, shards)
+	}
+}
+
+// Hammer get/set concurrently, including expiry transitions, to prove
+// the custom cache is race-free end to end.
+func TestDNSCacheConcurrent(t *testing.T) {
+	c := newDNSCache(cacheConfig{})
+	msg := &dns.Msg{}
+
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for i := 0; i < 500; i++ {
+				key := fmt.Sprintf("w%d-k%d", id, i%20)
+				if i%7 == 0 {
+					c.set(key, msg, time.Millisecond) // expires fast
+				} else if i%5 == 0 {
+					c.set(key, msg, time.Minute)
+				}
+				c.get(key)
+			}
+		}(w)
+	}
+	wg.Wait()
 }
 
 func RunLocalUDPServer(laddr string) (*dns.Server, error) {

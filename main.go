@@ -3,6 +3,7 @@ package main
 import (
 	_ "embed" // needed for go:embed VERSION.txt
 	"fmt"
+	"hash/maphash"
 	"math/rand/v2"
 	"os"
 	"strconv"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
-	"github.com/karlseguin/ccache/v3"
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/singleflight"
@@ -25,14 +25,125 @@ const (
 	configFilename = "config.yaml"
 )
 
+// Cache sizing defaults, overridable from config.yaml.
+const (
+	defaultCacheMaxEntries = 5000
+	defaultCacheShards     = 64
+	maxCacheShards         = 4096
+)
+
+// cacheEntry is one cached upstream answer with its expiry deadline.
+type cacheEntry struct {
+	msg     *dns.Msg
+	expires int64 // unix nanoseconds
+}
+
+// cacheShard is an independently locked slice of the cache, so hits on
+// different shards never contend.
+type cacheShard struct {
+	mu    sync.RWMutex
+	items map[string]cacheEntry
+}
+
+// dnsCache is a sharded TTL cache for upstream answers. maphash keeps
+// lookups allocation-free; shard count must be a power of two.
+type dnsCache struct {
+	seed   maphash.Seed
+	shards []cacheShard
+	mask   uint64
+	limit  int // per-shard entry cap
+}
+
+// newDNSCache builds a cache from cfg; zero fields fall back to the
+// defaults above.
+func newDNSCache(cfg cacheConfig) *dnsCache {
+	shards := cfg.Shards
+	if shards == 0 {
+		shards = defaultCacheShards
+	}
+	maxEntries := cfg.MaxEntries
+	if maxEntries == 0 {
+		maxEntries = defaultCacheMaxEntries
+	}
+	c := &dnsCache{
+		seed:   maphash.MakeSeed(),
+		shards: make([]cacheShard, shards),
+		mask:   uint64(shards - 1),
+		limit:  max(1, maxEntries/shards),
+	}
+	for i := range c.shards {
+		c.shards[i].items = make(map[string]cacheEntry, 8)
+	}
+	return c
+}
+
+// shard selects the lock domain for a key; on the query hot path this
+// is the only hashing step and performs no allocation.
+func (c *dnsCache) shard(key string) *cacheShard {
+	return &c.shards[maphash.String(c.seed, key)&c.mask]
+}
+
+// get returns the cached answer, treating expired entries as misses and
+// dropping them lazily.
+func (c *dnsCache) get(key string) (*dns.Msg, bool) {
+	s := c.shard(key)
+	now := time.Now().UnixNano()
+	s.mu.RLock()
+	e, ok := s.items[key]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if e.expires < now {
+		s.mu.Lock()
+		delete(s.items, key)
+		s.mu.Unlock()
+		return nil, false
+	}
+	return e.msg, true
+}
+
+// set stores an answer for ttl; ttl <= 0 disables caching entirely.
+// At capacity it evicts expired entries first, then an arbitrary one.
+func (c *dnsCache) set(key string, msg *dns.Msg, ttl time.Duration) {
+	if ttl <= 0 {
+		return
+	}
+	s := c.shard(key)
+	now := time.Now().UnixNano()
+	s.mu.Lock()
+	if len(s.items) >= c.limit {
+		for k, e := range s.items {
+			if e.expires < now {
+				delete(s.items, k)
+			}
+			if len(s.items) < c.limit {
+				break
+			}
+		}
+		for k := range s.items {
+			delete(s.items, k)
+			break
+		}
+	}
+	s.items[key] = cacheEntry{msg: msg, expires: now + int64(ttl)}
+	s.mu.Unlock()
+}
+
+// Shared process-wide state. cache is initialized with defaults for
+// tests and direct resolveDNSQuery callers; main() swaps in the
+// configured instance via configureCache before the DNS server starts
+// (single-threaded, so no synchronization is required).
 var (
-	cache = ccache.New[*dns.Msg](
-		ccache.Configure[*dns.Msg]().
-			Buckets(64).        // spread bucket-lock contention
-			GetsPerPromote(64), // throttle promote-channel traffic on hot keys
-	)
+	cache    = newDNSCache(cacheConfig{})
 	inflight singleflight.Group
 )
+
+// configureCache replaces the global cache with one built from cfg.
+// Must be called before serving any queries.
+func configureCache(cfg cacheConfig) {
+	cache = newDNSCache(cfg)
+}
 
 // dnsServer describes an upstream DNS server used for resolution.
 type dnsServer struct {
@@ -53,13 +164,21 @@ type authority struct {
 	DomainName  string `yaml:"domainName"`
 }
 
+// cacheConfig tunes the answer cache; all fields optional.
+type cacheConfig struct {
+	TTL        time.Duration `yaml:"ttl"`
+	MaxEntries int           `yaml:"maxEntries"`
+	Shards     int           `yaml:"shards"`
+}
+
 // config is the on-disk configuration loaded from config.yaml.
 type config struct {
 	ServerPort     int           `yaml:"serverPort"`
 	ServerIP       string        `yaml:"serverIP"`
 	ServerProtocol string        `yaml:"serverProtocol"`
+	CacheTTL       time.Duration `yaml:"cacheTTL"` // deprecated: use cache.ttl
+	Cache          cacheConfig   `yaml:"cache"`
 	Authorities    []authority   `yaml:"authorities"`
-	CacheTTL       time.Duration `yaml:"cacheTTL"`
 }
 
 // dnsHandler implements dns.Handler: it routes each query to the right
@@ -70,6 +189,10 @@ type dnsHandler struct {
 	// authorities is the runtime view of config.Authorities with
 	// canonicalized domains and pre-built clients (no per-query setup).
 	authorities []resolvedAuthority
+
+	// effectiveCacheTTL is cache.ttl, falling back to the deprecated
+	// top-level cacheTTL for hand-built or legacy configurations.
+	effectiveCacheTTL time.Duration
 
 	sync.WaitGroup
 }
@@ -87,6 +210,10 @@ type resolvedAuthority struct {
 // names and dns.Clients for every configured authority.
 func newDNSHandler(cfg *config) *dnsHandler {
 	handler := &dnsHandler{config: cfg}
+	handler.effectiveCacheTTL = cfg.Cache.TTL
+	if handler.effectiveCacheTTL == 0 {
+		handler.effectiveCacheTTL = cfg.CacheTTL
+	}
 	for _, authority := range cfg.Authorities {
 		server := dnsServer{
 			DNSServer:   authority.DNSServer,
@@ -202,15 +329,19 @@ func cacheKey(keyPrefix string, question dns.Question) string {
 // cachedFetch serves hits without any global lock; singleflight only
 // serializes concurrent misses for the same key into one upstream exchange.
 func cachedFetch(key string, cacheTTL time.Duration, fetch func() (*dns.Msg, error)) (*dns.Msg, error) {
-	if item := cache.Get(key); item != nil && !item.Expired() {
-		return item.Value(), nil
+	if msg, ok := cache.get(key); ok {
+		return msg, nil
 	}
 	value, err, _ := inflight.Do(key, func() (interface{}, error) {
-		item, err := cache.Fetch(key, cacheTTL, fetch)
+		if msg, ok := cache.get(key); ok {
+			return msg, nil
+		}
+		msg, err := fetch()
 		if err != nil {
 			return nil, err
 		}
-		return item.Value(), nil
+		cache.set(key, msg, cacheTTL)
+		return msg, nil
 	})
 	if err != nil {
 		return nil, err
@@ -294,7 +425,7 @@ func (handler *dnsHandler) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 
-	dnsResp, err := resolveDNSQuery(server.client, r, handler.config.CacheTTL, &server.server, server.keyPrefix)
+	dnsResp, err := resolveDNSQuery(server.client, r, handler.effectiveCacheTTL, &server.server, server.keyPrefix)
 	if err != nil {
 		log.Errorf("unable to find resolve dns query for %s : %s", questionDomain, err)
 		return
@@ -320,6 +451,21 @@ func loadConfig() (*config, error) {
 
 	if len(cfg.Authorities) == 0 {
 		return nil, fmt.Errorf("no authorities configured")
+	}
+
+	// Legacy top-level cacheTTL still applies when cache.ttl is unset.
+	if cfg.Cache.TTL == 0 && cfg.CacheTTL != 0 {
+		cfg.Cache.TTL = cfg.CacheTTL
+	}
+	switch {
+	case cfg.Cache.Shards < 0:
+		return nil, fmt.Errorf("cache.shards must be positive")
+	case cfg.Cache.Shards > maxCacheShards:
+		return nil, fmt.Errorf("cache.shards must not exceed %d", maxCacheShards)
+	case cfg.Cache.Shards != 0 && cfg.Cache.Shards&(cfg.Cache.Shards-1) != 0:
+		return nil, fmt.Errorf("cache.shards must be a power of two")
+	case cfg.Cache.MaxEntries < 0:
+		return nil, fmt.Errorf("cache.maxEntries must be positive")
 	}
 
 	if cfg.ServerPort < 1 || cfg.ServerPort > 65535 {
@@ -374,6 +520,7 @@ func main() {
 	log.Debugf("cfg %+v", cfg)
 
 	handler := newDNSHandler(cfg)
+	configureCache(cfg.Cache)
 
 	if err := dns.ListenAndServe(fmt.Sprintf("%s:%d", cfg.ServerIP, cfg.ServerPort), cfg.ServerProtocol, handler); err != nil {
 		log.Fatalf("unable to serve %s", err)
